@@ -57,16 +57,28 @@ so every scale is representable in RTL as a shift:
 python scripts/train_and_export.py --output-dir build/transformer
 ```
 
-Exports include every embedding, layer-normalization affine parameter, linear
-weight, and bias. `weights/W_Q.hex`, `weights/W_K.hex`, `weights/W_V.hex`,
-`weights/W_O.hex`, `weights/W_FF1.hex`, `weights/W_FF2.hex`, and
-`weights/W_VOCAB.hex` are row-major `[output][input]` matrices, directly
-compatible with a 4x4 MAC tile. `manifest.json` specifies every tensor shape
-and shift; `quantization_config.h` provides the firmware constants. The script
-only exports after reaching its loss target unless `--allow-unconverged` is set.
+Exports include every embedding, linear weight, and bias. `W_Q.hex`,
+`W_K.hex`, `W_V.hex`, `W_O.hex`, `W_FF1.hex`, `W_FF2.hex`, and
+`W_VOCAB.hex` are row-major `[output][input]` matrices, directly compatible
+with a 4x4 MAC tile. `manifest.json` specifies every tensor shape and shift;
+`quantization_config.h` provides the firmware constants. The script only
+exports after reaching its loss target unless `--allow-unconverged` is set.
 `NPU_ATTENTION_DK_SHIFT` is the exact `1/sqrt(16)` divide-by-four shift;
 `NPU_FFN_SCALING_SHIFT` and `NPU_SOFTMAX_INPUT_SHIFT` are calibrated
 power-of-two activation scales.
+
+The current export is a no-LayerNorm decoder block so the RV32I host can
+orchestrate it without a floating-point normalization implementation. To
+generate firmware-linkable arrays after training:
+
+```powershell
+python scripts/train_and_export.py --output-dir model_hex
+python scripts/export_c_header.py --model-dir model_hex --output ..\riscPROJET\software\model_weights.h
+Copy-Item model_hex\quantization_config.h ..\riscPROJET\software\
+```
+
+`export_c_header.py` validates each `.hex` file against `model_hex/manifest.json`
+before writing the signed `int8_t` arrays.
 
 ## Simulate
 

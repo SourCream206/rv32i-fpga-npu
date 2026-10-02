@@ -36,18 +36,16 @@ class QuantizedTensor:
 
 
 class MicroTransformer(nn.Module):
-    """One pre-layer-normalized, single-head causal decoder block."""
+    """One single-head causal decoder block without LayerNorm."""
 
     def __init__(self) -> None:
         super().__init__()
         self.token_embedding = nn.Embedding(N_VOCAB, D_MODEL)
         self.position_embedding = nn.Embedding(L_SEQ, D_MODEL)
-        self.ln1 = nn.LayerNorm(D_MODEL)
         self.w_q = nn.Linear(D_MODEL, D_MODEL)
         self.w_k = nn.Linear(D_MODEL, D_MODEL)
         self.w_v = nn.Linear(D_MODEL, D_MODEL)
         self.w_o = nn.Linear(D_MODEL, D_MODEL)
-        self.ln2 = nn.LayerNorm(D_MODEL)
         self.w_ff1 = nn.Linear(D_MODEL, D_FF)
         self.w_ff2 = nn.Linear(D_FF, D_MODEL)
         self.w_vocab = nn.Linear(D_MODEL, N_VOCAB)
@@ -57,10 +55,9 @@ class MicroTransformer(nn.Module):
         positions = torch.arange(sequence_length, device=tokens.device)
         hidden = self.token_embedding(tokens) + self.position_embedding(positions)
 
-        normalized = self.ln1(hidden)
-        query = self.w_q(normalized)
-        key = self.w_k(normalized)
-        value = self.w_v(normalized)
+        query = self.w_q(hidden)
+        key = self.w_k(hidden)
+        value = self.w_v(hidden)
         attention_scores = query @ key.transpose(-2, -1) / math.sqrt(D_MODEL)
         causal_mask = torch.triu(
             torch.ones(sequence_length, sequence_length, device=tokens.device, dtype=torch.bool),
@@ -70,8 +67,7 @@ class MicroTransformer(nn.Module):
         attention = functional.softmax(attention_scores, dim=-1)
         hidden = hidden + self.w_o(attention @ value)
 
-        normalized = self.ln2(hidden)
-        ffn_hidden = functional.gelu(self.w_ff1(normalized))
+        ffn_hidden = functional.gelu(self.w_ff1(hidden))
         hidden = hidden + self.w_ff2(ffn_hidden)
         logits = self.w_vocab(hidden)
 
@@ -133,8 +129,6 @@ def parameter_exports(model: MicroTransformer) -> dict[str, Tensor]:
     return {
         "TOKEN_EMBEDDING": model.token_embedding.weight,
         "POSITION_EMBEDDING": model.position_embedding.weight,
-        "LN1_WEIGHT": model.ln1.weight,
-        "LN1_BIAS": model.ln1.bias,
         "W_Q": model.w_q.weight,
         "B_Q": model.w_q.bias,
         "W_K": model.w_k.weight,
@@ -143,8 +137,6 @@ def parameter_exports(model: MicroTransformer) -> dict[str, Tensor]:
         "B_V": model.w_v.bias,
         "W_O": model.w_o.weight,
         "B_O": model.w_o.bias,
-        "LN2_WEIGHT": model.ln2.weight,
-        "LN2_BIAS": model.ln2.bias,
         "W_FF1": model.w_ff1.weight,
         "B_FF1": model.w_ff1.bias,
         "W_FF2": model.w_ff2.weight,
@@ -222,7 +214,7 @@ def train(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--corpus", type=Path, help="Optional ASCII corpus file.")
-    parser.add_argument("--output-dir", type=Path, default=Path("build/transformer"))
+    parser.add_argument("--output-dir", type=Path, default=Path("model_hex"))
     parser.add_argument("--steps", type=int, default=3000)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=3e-3)
@@ -259,7 +251,7 @@ def main() -> None:
         for name, parameter in parameter_exports(model).items()
     }
     activation_shifts = calibrated_activation_shifts(model, tokens[:L_SEQ])
-    weights_dir = args.output_dir / "weights"
+    weights_dir = args.output_dir
     weights_dir.mkdir(parents=True, exist_ok=True)
     for name, quantized in parameters.items():
         write_readmemh(weights_dir / f"{name}.hex", quantized.values)
@@ -290,7 +282,7 @@ def main() -> None:
         "activation_scale_shifts": activation_shifts,
         "tensors": {
             name: {
-                "file": f"weights/{name}.hex",
+                "file": f"{name}.hex",
                 "shape": list(quantized.values.shape),
                 "scale_shift": quantized.scale_shift,
             }

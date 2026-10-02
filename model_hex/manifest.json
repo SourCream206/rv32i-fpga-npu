@@ -1,0 +1,151 @@
+{
+  "architecture": {
+    "vocab_size": 64,
+    "d_model": 16,
+    "context_length": 16,
+    "d_ff": 32,
+    "attention_heads": 1,
+    "attention_dk": 16,
+    "attention_dk_shift": 2
+  },
+  "vocabulary": " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_",
+  "format": {
+    "element_type": "signed_int8",
+    "encoding": "two_complement_hex",
+    "storage_order": "row_major_output_input",
+    "scale": "dequantized_value = int8_value * 2^scale_shift"
+  },
+  "training": {
+    "steps_completed": 1049,
+    "final_loss": 0.33882972598075867,
+    "target_loss": 0.35,
+    "corpus_characters": 222
+  },
+  "activation_scale_shifts": {
+    "FFN_ACTIVATION": -3,
+    "SOFTMAX_INPUT": -3
+  },
+  "tensors": {
+    "TOKEN_EMBEDDING": {
+      "file": "TOKEN_EMBEDDING.hex",
+      "shape": [
+        64,
+        16
+      ],
+      "scale_shift": -4
+    },
+    "POSITION_EMBEDDING": {
+      "file": "POSITION_EMBEDDING.hex",
+      "shape": [
+        16,
+        16
+      ],
+      "scale_shift": -5
+    },
+    "W_Q": {
+      "file": "W_Q.hex",
+      "shape": [
+        16,
+        16
+      ],
+      "scale_shift": -7
+    },
+    "B_Q": {
+      "file": "B_Q.hex",
+      "shape": [
+        16
+      ],
+      "scale_shift": -6
+    },
+    "W_K": {
+      "file": "W_K.hex",
+      "shape": [
+        16,
+        16
+      ],
+      "scale_shift": -7
+    },
+    "B_K": {
+      "file": "B_K.hex",
+      "shape": [
+        16
+      ],
+      "scale_shift": -9
+    },
+    "W_V": {
+      "file": "W_V.hex",
+      "shape": [
+        16,
+        16
+      ],
+      "scale_shift": -6
+    },
+    "B_V": {
+      "file": "B_V.hex",
+      "shape": [
+        16
+      ],
+      "scale_shift": -7
+    },
+    "W_O": {
+      "file": "W_O.hex",
+      "shape": [
+        16,
+        16
+      ],
+      "scale_shift": -7
+    },
+    "B_O": {
+      "file": "B_O.hex",
+      "shape": [
+        16
+      ],
+      "scale_shift": -8
+    },
+    "W_FF1": {
+      "file": "W_FF1.hex",
+      "shape": [
+        32,
+        16
+      ],
+      "scale_shift": -6
+    },
+    "B_FF1": {
+      "file": "B_FF1.hex",
+      "shape": [
+        32
+      ],
+      "scale_shift": -7
+    },
+    "W_FF2": {
+      "file": "W_FF2.hex",
+      "shape": [
+        16,
+        32
+      ],
+      "scale_shift": -6
+    },
+    "B_FF2": {
+      "file": "B_FF2.hex",
+      "shape": [
+        16
+      ],
+      "scale_shift": -8
+    },
+    "W_VOCAB": {
+      "file": "W_VOCAB.hex",
+      "shape": [
+        64,
+        16
+      ],
+      "scale_shift": -6
+    },
+    "B_VOCAB": {
+      "file": "B_VOCAB.hex",
+      "shape": [
+        64
+      ],
+      "scale_shift": -8
+    }
+  }
+}
