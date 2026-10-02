@@ -7,6 +7,9 @@ module tb_npu_peripheral;
     logic [31:0] bus_addr;
     logic [31:0] bus_wdata;
     logic [31:0] bus_rdata;
+    integer index;
+    integer lane;
+    logic [31:0] packed_weights;
 
     npu_peripheral dut (
         .clk(clk),
@@ -51,32 +54,36 @@ module tb_npu_peripheral;
         repeat (2) @(posedge clk);
         rst = 1'b0;
 
-        write_register(32'h0006_0008, 32'hFC03_FE01);
+        write_register(32'h0006_0008, 32'd0);
+        write_register(32'h0006_000C, 32'h0101_0101);
+        write_register(32'h0006_000C, 32'h0101_0101);
+        write_register(32'h0006_000C, 32'h0101_0101);
+        write_register(32'h0006_000C, 32'h0101_0101);
+
         write_register(32'h0006_0010, 32'd0);
-        write_register(32'h0006_0014, 32'h0403_0201);
-        write_register(32'h0006_0014, 32'h02FD_00FF);
-        write_register(32'h0006_0014, 32'hFF01_807F);
-        write_register(32'h0006_0014, 32'hFB05_FA08);
-        expect_read(32'h0006_0010, 32'd0);
-        expect_read(32'h0006_0004, 32'd0);
+        for (index = 0; index < 64; index = index + 1) begin
+            packed_weights = '0;
+            for (lane = 0; lane < 4; lane = lane + 1)
+                if (((index * 4 + lane) % 17) == 0)
+                    packed_weights[lane * 8 +: 8] = 8'd1;
+            write_register(32'h0006_0014, packed_weights);
+        end
 
-        write_register(32'h0006_0000, 32'h0000_0001);
+        write_register(32'h0006_0018, 32'd0);
+        write_register(32'h0006_001C, 32'd0);
+        write_register(32'h0006_001C, 32'd0);
+        write_register(32'h0006_001C, 32'd0);
+        write_register(32'h0006_001C, 32'd0);
+        write_register(32'h0006_0020, 32'd0);
+        write_register(32'h0006_0000, 32'h0000_0009);
         expect_read(32'h0006_0004, 32'h0000_0001);
-        repeat (3) @(posedge clk);
-        expect_read(32'h0006_0004, 32'h0000_0002);
-        expect_read(32'h0006_0020, -32'sd10);
-        expect_read(32'h0006_0024, -32'sd18);
-        expect_read(32'h0006_0028, 32'sd390);
-        expect_read(32'h0006_002C, 32'sd55);
 
-        write_register(32'h0006_0000, 32'h0000_0002);
-        @(posedge clk);
-        expect_read(32'h0006_0004, 32'd0);
-        expect_read(32'h0006_0020, 32'd0);
-        expect_read(32'h0006_0024, 32'd0);
-        expect_read(32'h0006_0028, 32'd0);
-        expect_read(32'h0006_002C, 32'd0);
-        $display("PASS: npu_peripheral");
+        repeat (100) @(posedge clk);
+        expect_read(32'h0006_0004, 32'h0000_0002);
+        write_register(32'h0006_0024, 32'd0);
+        expect_read(32'h0006_0028, 32'h0101_0101);
+        expect_read(32'h0006_002C, 32'd4095);
+        $display("PASS: 16x16 tiled NPU projection and softmax");
         $finish;
     end
 

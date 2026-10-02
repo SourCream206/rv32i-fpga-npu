@@ -1,37 +1,49 @@
-# NPU memory map
+# 16x16 projection NPU memory map
 
-The existing RV32I system decodes peripherals by `dmem_addr[31:16]`. Reserve
-`0x0006_0000` through `0x0006_00FF` for the NPU.
+The NPU reserves `0x0006_0000` through `0x0006_002F` in the RV32I data-memory
+map. One start command executes all sixteen 4x4 tiles required for a 16x16
+matrix-vector projection. No CPU intervention occurs while the NPU is busy.
 
 | Address | Name | Access | Description |
 |---|---|---|---|
-| `0x0006_0000` | `NPU_CONTROL` | RW | Write bit 0 as `1` to start one operation; write bit 1 as `1` to cancel and clear. |
-| `0x0006_0004` | `NPU_STATUS` | RO | Bit 0: busy. Bit 1: done; cleared when a new start is accepted. |
-| `0x0006_0008` | `NPU_INPUT0` | RW | Four signed INT8 activations packed little-endian: lanes 0-3 in bits 7:0 through 31:24. |
-| `0x0006_0010` | `NPU_WEIGHT_ADDR` | RW | Index of the first weight byte to load from the exported `weights.hex` image. |
-| `0x0006_0014` | `NPU_WEIGHT_DATA` | RW | Four signed INT8 weights packed little-endian. Autoincrement `NPU_WEIGHT_ADDR` by four after each write. |
-| `0x0006_0020` | `NPU_ACCUM0` | RO | Signed INT32 output lane 0. |
-| `0x0006_0024` | `NPU_ACCUM1` | RO | Signed INT32 output lane 1. |
-| `0x0006_0028` | `NPU_ACCUM2` | RO | Signed INT32 output lane 2. |
-| `0x0006_002C` | `NPU_ACCUM3` | RO | Signed INT32 output lane 3. |
-| `0x0006_0030` | `NPU_SOFTMAX0` | RO | Reserved for unsigned Q0.16 probability lane 0. |
-| `0x0006_0034` | `NPU_SOFTMAX1` | RO | Reserved for unsigned Q0.16 probability lane 1. |
-| `0x0006_0038` | `NPU_SOFTMAX2` | RO | Reserved for unsigned Q0.16 probability lane 2. |
-| `0x0006_003C` | `NPU_SOFTMAX3` | RO | Reserved for unsigned Q0.16 probability lane 3. |
+| `0x0006_0000` | `NPU_CONTROL` | WO | Bit 0: start. Bit 1: cancel. Bit 2: apply clipped-ReLU GeLU approximation. Bit 3: calculate softmax. |
+| `0x0006_0004` | `NPU_STATUS` | RO | Bit 0: busy. Bit 1: done. |
+| `0x0006_0008` | `NPU_INPUT_ADDR` | RW | First signed INT8 input index, `0..15`. |
+| `0x0006_000C` | `NPU_INPUT_DATA` | WO | Four packed signed INT8 inputs, little-endian. Address autoincrements by four. |
+| `0x0006_0010` | `NPU_WEIGHT_ADDR` | RW | First signed INT8 weight index, `0..255`. |
+| `0x0006_0014` | `NPU_WEIGHT_DATA` | WO | Four packed weights. Row-major weight index is `row * 16 + column`. Address autoincrements by four. |
+| `0x0006_0018` | `NPU_BIAS_ADDR` | RW | First signed INT8 bias index, `0..15`. |
+| `0x0006_001C` | `NPU_BIAS_DATA` | WO | Four packed signed INT8 biases. Address autoincrements by four. |
+| `0x0006_0020` | `NPU_SCALE` | RW | Bits 3:0: projection arithmetic right shift. Bits 11:8: softmax-delta right shift. |
+| `0x0006_0024` | `NPU_OUTPUT_ADDR` | RW | First output or softmax index, `0..15`. |
+| `0x0006_0028` | `NPU_OUTPUT_DATA` | RO | Four packed signed Q4.4 activations, little-endian, starting at output address. |
+| `0x0006_002C` | `NPU_SOFTMAX_DATA` | RO | Q0.16 probability for output address in bits 15:0. Valid after a start with control bit 3 set. |
 
-## Software protocol
+## Datapath
 
-1. While `NPU_STATUS.busy` is clear, write the packed four-lane activation
-   vector to `NPU_INPUT0`.
-2. Load sixteen signed INT8 weights through `NPU_WEIGHT_ADDR` and
-   `NPU_WEIGHT_DATA`, or initialize the NPU weight RAM with `weights.hex`.
-3. Write `1` to `NPU_CONTROL` bit 0. The NPU clears old accumulators, then
-   executes one matrix-vector operation.
-4. Poll `NPU_STATUS.done`, then read `NPU_ACCUM0` through `NPU_ACCUM3`.
+`W_MEM`, `IN_MEM`, and `ACT_MEM` are declared with the Quartus `M9K` RAM-style
+attribute. The controller iterates output tile `0..3` and input tile `0..3`.
+For each tile, it clears the 4x4 MAC array, executes one signed INT8
+matrix-vector product, and accumulates the four INT32 results into the active
+four output rows. Loaded signed INT8 biases initialize those accumulators.
 
-`NPU_INPUT0`, `NPU_WEIGHT_ADDR`, and `NPU_WEIGHT_DATA` writes are ignored while
-busy so that a transaction cannot alter an operation in flight.
+After each output row's fourth input tile, the controller applies the
+programmed arithmetic right shift and saturates to signed Q4.4. When control
+bit 2 is set, negative results clip to zero; this is the selected hardware
+GeLU approximation.
 
-The first hardware revision leaves softmax reserved. Firmware can dequantize
-the four INT32 logits and calculate softmax until a fixed-point approximation
-is added. This keeps the initial FPGA integration small and fully verifiable.
+With control bit 3 set, a 64-entry LUT evaluates `exp(-delta / 16)` for
+clamped `delta` indices `0..63`, where `delta` is the shifted difference from
+the largest Q4.4 logit. The NPU sums all LUT values and normalizes them to
+Q0.16. For equal logits, each of sixteen outputs is `4095`.
+
+## Software sequence
+
+1. While `NPU_STATUS.busy` is clear, write 16 inputs, 256 weights, and 16
+   biases through their address/data port pairs.
+2. Write shifts to `NPU_SCALE`.
+3. Write `1`, `5`, `9`, or `13` to `NPU_CONTROL` for raw, clipped-ReLU,
+   softmax, or clipped-ReLU-plus-softmax execution.
+4. Poll `NPU_STATUS.done`.
+5. Set `NPU_OUTPUT_ADDR`, then read packed activations from `NPU_OUTPUT_DATA`.
+   If enabled, read one Q0.16 probability from `NPU_SOFTMAX_DATA`.

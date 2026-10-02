@@ -2,21 +2,21 @@
 
 Starter project for a memory-mapped FPGA NPU attached to the RV32I CPU in
 [`rv32i-starflight-fpga`](https://github.com/SourCream206/rv32i-starflight-fpga).
-The first verified block is a signed INT8 4x4 matrix-vector MAC array. It is a
-building block for the linear projections in a tiny character-level Transformer.
+The first projection engine tiles a signed INT8 4x4 MAC array into an
+autonomous 16x16 matrix-vector unit for a tiny character-level Transformer.
 
 ## Scope
 
-This project deliberately does not yet implement attention, layer normalization,
-or hardware softmax. The MAC array accumulates a 4x4 signed matrix-vector
-product across enabled cycles:
+This project deliberately does not yet implement full attention or layer
+normalization. Its projection controller accumulates sixteen 4x4 MAC tiles:
 
 ```text
-accumulator[row] += sum(weight[row][column] * activation[column])
+output[row] = bias[row] + sum(weight[row][column] * input[column])
 ```
 
-All multiplication inputs are signed two's-complement INT8. Accumulators wrap
-in signed INT32 two's-complement arithmetic, matching the Python reference.
+All multiplication inputs are signed two's-complement INT8. Intermediate sums
+are signed INT32; final activation memory is signed Q4.4. The optional softmax
+unit uses a 64-entry exponential LUT and emits unsigned Q0.16 probabilities.
 
 ## Layout
 
@@ -26,9 +26,9 @@ python/reference_model.py     Bit-exact MAC reference model
 scripts/train_and_export.py   Train and export the 64-token micro-Transformer
 rtl/mac_array_4x4.sv          4x4 signed MAC array
 tb/tb_mac_array_4x4.sv        Self-checking SystemVerilog testbench
-rtl/npu_peripheral.sv         Memory-mapped NPU register interface
-tb/tb_npu_peripheral.sv       Self-checking peripheral testbench
-docs/memory_map.md            RV32I NPU register map
+rtl/npu_peripheral.sv         Autonomous 16x16 tiled projection controller
+tb/tb_npu_peripheral.sv       Self-checking tiled projection/softmax testbench
+docs/memory_map.md            16x16 NPU register map and fixed-point contract
 docs/rv32i_integration.md     Exact existing-CPU integration changes
 ```
 
