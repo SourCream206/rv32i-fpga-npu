@@ -23,6 +23,7 @@ in signed INT32 two's-complement arithmetic, matching the Python reference.
 ```text
 python/export_int8_linear.py  PTQ example and $readmemh hex export
 python/reference_model.py     Bit-exact MAC reference model
+scripts/train_and_export.py   Train and export the 64-token micro-Transformer
 rtl/mac_array_4x4.sv          4x4 signed MAC array
 tb/tb_mac_array_4x4.sv        Self-checking SystemVerilog testbench
 rtl/npu_peripheral.sv         Memory-mapped NPU register interface
@@ -44,6 +45,28 @@ The script runs PyTorch static post-training quantization with representative
 calibration inputs. `weights.hex` contains one signed INT8 weight per line for
 `$readmemh`; `bias.hex` contains the corresponding quantized INT32 bias. INT32
 bias is required for a correct INT8 x INT8 -> INT32 MAC datapath.
+
+## Train and export the micro-Transformer
+
+The training/export script defines a one-layer, single-head causal Transformer
+with a 64-character ASCII vocabulary, `d_model=16`, `L_seq=16`, and `d_ff=32`.
+It trains on a short built-in corpus, then uses power-of-two symmetric INT8 PTQ
+so every scale is representable in RTL as a shift:
+
+```powershell
+python scripts/train_and_export.py --output-dir build/transformer
+```
+
+Exports include every embedding, layer-normalization affine parameter, linear
+weight, and bias. `weights/W_Q.hex`, `weights/W_K.hex`, `weights/W_V.hex`,
+`weights/W_O.hex`, `weights/W_FF1.hex`, `weights/W_FF2.hex`, and
+`weights/W_VOCAB.hex` are row-major `[output][input]` matrices, directly
+compatible with a 4x4 MAC tile. `manifest.json` specifies every tensor shape
+and shift; `quantization_config.h` provides the firmware constants. The script
+only exports after reaching its loss target unless `--allow-unconverged` is set.
+`NPU_ATTENTION_DK_SHIFT` is the exact `1/sqrt(16)` divide-by-four shift;
+`NPU_FFN_SCALING_SHIFT` and `NPU_SOFTMAX_INPUT_SHIFT` are calibrated
+power-of-two activation scales.
 
 ## Simulate
 
