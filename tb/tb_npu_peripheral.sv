@@ -83,6 +83,12 @@ module tb_npu_peripheral;
         write_register(32'h0006_0024, 32'd0);
         expect_read(32'h0006_0028, 32'h0101_0101);
         expect_read(32'h0006_002C, 32'd4095);
+
+        write_register(32'h0006_0030, -32'sd1);
+        write_register(32'h0006_0000, 32'h0000_0001);
+        repeat (60) @(posedge clk);
+        expect_read(32'h0006_0024, 32'd0);
+        expect_read(32'h0006_0028, 32'h0202_0202);
         $display("PASS: 16x16 tiled NPU projection and softmax");
         $finish;
     end

@@ -20,6 +20,7 @@ module npu_peripheral (
     localparam logic [5:2] OUTPUT_ADDR = 4'h9;
     localparam logic [5:2] OUTPUT_DATA = 4'hA;
     localparam logic [5:2] SOFTMAX_DATA = 4'hB;
+    localparam logic [5:2] SHIFT_REG    = 4'hC;
 
     typedef enum logic [3:0] {
         IDLE,
@@ -51,7 +52,7 @@ module npu_peripheral (
     logic [3:0] output_address;
     logic [3:0] output_tile;
     logic [3:0] input_tile;
-    logic [3:0] projection_shift;
+    logic signed [31:0] projection_shift;
     logic [3:0] softmax_shift;
     logic apply_gelu;
     logic apply_softmax;
@@ -68,12 +69,15 @@ module npu_peripheral (
 
     function automatic logic signed [7:0] quantize_activation(
         input logic signed [31:0] value,
-        input logic [3:0] shift,
+        input logic signed [31:0] shift,
         input logic gelu
     );
         logic signed [31:0] shifted;
         begin
-            shifted = value >>> shift;
+            if (shift >= 0)
+                shifted = value >>> shift;
+            else
+                shifted = value <<< -shift;
             if (gelu && (shifted < 0))
                 quantize_activation = 8'sd0;
             else if (shifted > 127)
@@ -318,10 +322,11 @@ module npu_peripheral (
                         bias_address <= bias_address + 4;
                     end
                     SCALE: if ((state == IDLE) || (state == DONE)) begin
-                        projection_shift <= bus_wdata[3:0];
                         softmax_shift <= bus_wdata[11:8];
                     end
                     OUTPUT_ADDR: output_address <= bus_wdata[3:0];
+                    SHIFT_REG: if ((state == IDLE) || (state == DONE))
+                        projection_shift <= $signed(bus_wdata);
                     default: ;
                 endcase
             end
@@ -336,7 +341,7 @@ module npu_peripheral (
                 INPUT_ADDR:   bus_rdata = {28'd0, input_address};
                 WEIGHT_ADDR:  bus_rdata = {24'd0, weight_address};
                 BIAS_ADDR:    bus_rdata = {28'd0, bias_address};
-                SCALE:        bus_rdata = {20'd0, softmax_shift, 4'd0, projection_shift};
+                SCALE:        bus_rdata = {20'd0, softmax_shift, 8'd0};
                 OUTPUT_ADDR:  bus_rdata = {28'd0, output_address};
                 OUTPUT_DATA:  bus_rdata = {
                     act_mem[(output_address + 3) & 4'hF],
@@ -345,6 +350,7 @@ module npu_peripheral (
                     act_mem[output_address]
                 };
                 SOFTMAX_DATA: bus_rdata = {16'd0, softmax_output[output_address]};
+                SHIFT_REG:    bus_rdata = projection_shift;
                 default:      bus_rdata = '0;
             endcase
         end

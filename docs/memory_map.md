@@ -14,10 +14,11 @@ matrix-vector projection. No CPU intervention occurs while the NPU is busy.
 | `0x0006_0014` | `NPU_WEIGHT_DATA` | WO | Four packed weights. Row-major weight index is `row * 16 + column`. Address autoincrements by four. |
 | `0x0006_0018` | `NPU_BIAS_ADDR` | RW | First signed INT8 bias index, `0..15`. |
 | `0x0006_001C` | `NPU_BIAS_DATA` | WO | Four packed signed INT8 biases. Address autoincrements by four. |
-| `0x0006_0020` | `NPU_SCALE` | RW | Bits 3:0: projection arithmetic right shift. Bits 11:8: softmax-delta right shift. |
+| `0x0006_0020` | `NPU_SCALE` | RW | Bits 11:8: softmax-delta arithmetic right shift. |
 | `0x0006_0024` | `NPU_OUTPUT_ADDR` | RW | First output or softmax index, `0..15`. |
 | `0x0006_0028` | `NPU_OUTPUT_DATA` | RO | Four packed signed Q4.4 activations, little-endian, starting at output address. |
 | `0x0006_002C` | `NPU_SOFTMAX_DATA` | RO | Q0.16 probability for output address in bits 15:0. Valid after a start with control bit 3 set. |
+| `0x0006_0030` | `NPU_SHIFT_REG` | RW | Signed projection shift. Nonnegative values use arithmetic right shift; negative values use arithmetic left shift. |
 
 ## Datapath
 
@@ -27,10 +28,10 @@ For each tile, it clears the 4x4 MAC array, executes one signed INT8
 matrix-vector product, and accumulates the four INT32 results into the active
 four output rows. Loaded signed INT8 biases initialize those accumulators.
 
-After each output row's fourth input tile, the controller applies the
-programmed arithmetic right shift and saturates to signed Q4.4. When control
-bit 2 is set, negative results clip to zero; this is the selected hardware
-GeLU approximation.
+After each output row's fourth input tile, controller applies signed shift and
+saturates to signed Q4.4. Nonnegative shifts are arithmetic right shifts;
+negative shifts are arithmetic left shifts. When control bit 2 is set,
+negative results clip to zero; this is selected hardware GeLU approximation.
 
 With control bit 3 set, a 64-entry LUT evaluates `exp(-delta / 16)` for
 clamped `delta` indices `0..63`, where `delta` is the shifted difference from
@@ -41,7 +42,8 @@ Q0.16. For equal logits, each of sixteen outputs is `4095`.
 
 1. While `NPU_STATUS.busy` is clear, write 16 inputs, 256 weights, and 16
    biases through their address/data port pairs.
-2. Write shifts to `NPU_SCALE`.
+2. Write softmax shift to `NPU_SCALE` and signed projection shift to
+   `NPU_SHIFT_REG`.
 3. Write `1`, `5`, `9`, or `13` to `NPU_CONTROL` for raw, clipped-ReLU,
    softmax, or clipped-ReLU-plus-softmax execution.
 4. Poll `NPU_STATUS.done`.
