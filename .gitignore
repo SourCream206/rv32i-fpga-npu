@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+build/
+work/
+modelsim.ini
+transcript
+vsim.wlf
