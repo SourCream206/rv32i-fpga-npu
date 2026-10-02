@@ -25,7 +25,10 @@ python/export_int8_linear.py  PTQ example and $readmemh hex export
 python/reference_model.py     Bit-exact MAC reference model
 rtl/mac_array_4x4.sv          4x4 signed MAC array
 tb/tb_mac_array_4x4.sv        Self-checking SystemVerilog testbench
-docs/memory_map.md            Proposed RV32I NPU register map
+rtl/npu_peripheral.sv         Memory-mapped NPU register interface
+tb/tb_npu_peripheral.sv       Self-checking peripheral testbench
+docs/memory_map.md            RV32I NPU register map
+docs/rv32i_integration.md     Exact existing-CPU integration changes
 ```
 
 ## Quantize and export
@@ -49,12 +52,15 @@ With Icarus Verilog:
 ```powershell
 iverilog -g2012 -s tb_mac_array_4x4 -o build/mac_tb rtl/mac_array_4x4.sv tb/tb_mac_array_4x4.sv
 vvp build/mac_tb
+iverilog -g2012 -s tb_npu_peripheral -o build/npu_tb rtl/mac_array_4x4.sv rtl/npu_peripheral.sv tb/tb_npu_peripheral.sv
+vvp build/npu_tb
 ```
 
 The testbench must print `PASS`.
 
 ## Memory map
 
-The existing CPU uses upper 16-bit address decoding. Reserve `0x0006_xxxx` for
-the NPU. See [docs/memory_map.md](docs/memory_map.md) for the complete map and
-software protocol.
+The NPU implements the `0x0006_xxxx` range used by the existing CPU. See
+[docs/memory_map.md](docs/memory_map.md) for the complete map and software
+protocol, then use [docs/rv32i_integration.md](docs/rv32i_integration.md) to
+attach it to the RV32I system.

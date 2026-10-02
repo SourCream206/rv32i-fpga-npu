@@ -5,10 +5,9 @@ The existing RV32I system decodes peripherals by `dmem_addr[31:16]`. Reserve
 
 | Address | Name | Access | Description |
 |---|---|---|---|
-| `0x0006_0000` | `NPU_CONTROL` | RW | Write bit 0 as `1` to start; write bit 1 as `1` to clear the engine. |
+| `0x0006_0000` | `NPU_CONTROL` | RW | Write bit 0 as `1` to start one operation; write bit 1 as `1` to cancel and clear. |
 | `0x0006_0004` | `NPU_STATUS` | RO | Bit 0: busy. Bit 1: done; cleared when a new start is accepted. |
 | `0x0006_0008` | `NPU_INPUT0` | RW | Four signed INT8 activations packed little-endian: lanes 0-3 in bits 7:0 through 31:24. |
-| `0x0006_000C` | `NPU_INPUT1` | RW | Reserved for future token embedding or the next vector. |
 | `0x0006_0010` | `NPU_WEIGHT_ADDR` | RW | Index of the first weight byte to load from the exported `weights.hex` image. |
 | `0x0006_0014` | `NPU_WEIGHT_DATA` | RW | Four signed INT8 weights packed little-endian. Autoincrement `NPU_WEIGHT_ADDR` by four after each write. |
 | `0x0006_0020` | `NPU_ACCUM0` | RO | Signed INT32 output lane 0. |
@@ -22,12 +21,16 @@ The existing RV32I system decodes peripherals by `dmem_addr[31:16]`. Reserve
 
 ## Software protocol
 
-1. Write the packed four-lane activation vector to `NPU_INPUT0`.
+1. While `NPU_STATUS.busy` is clear, write the packed four-lane activation
+   vector to `NPU_INPUT0`.
 2. Load sixteen signed INT8 weights through `NPU_WEIGHT_ADDR` and
    `NPU_WEIGHT_DATA`, or initialize the NPU weight RAM with `weights.hex`.
-3. Write `1` to `NPU_CONTROL` bit 1 to clear prior accumulators.
-4. Write `1` to `NPU_CONTROL` bit 0 to start the matrix-vector operation.
-5. Poll `NPU_STATUS.done`, then read `NPU_ACCUM0` through `NPU_ACCUM3`.
+3. Write `1` to `NPU_CONTROL` bit 0. The NPU clears old accumulators, then
+   executes one matrix-vector operation.
+4. Poll `NPU_STATUS.done`, then read `NPU_ACCUM0` through `NPU_ACCUM3`.
+
+`NPU_INPUT0`, `NPU_WEIGHT_ADDR`, and `NPU_WEIGHT_DATA` writes are ignored while
+busy so that a transaction cannot alter an operation in flight.
 
 The first hardware revision leaves softmax reserved. Firmware can dequantize
 the four INT32 logits and calculate softmax until a fixed-point approximation
