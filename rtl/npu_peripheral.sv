@@ -79,7 +79,7 @@ module npu_peripheral (
             else if (shifted > 127)
                 quantize_activation = 8'sd127;
             else if (shifted < -128)
-                quantize_activation = -8'sd128;
+                quantize_activation = 8'sh80;
             else
                 quantize_activation = shifted[7:0];
         end
@@ -140,6 +140,17 @@ module npu_peripheral (
                 6'd60: softmax_lut = 16'd1541; 6'd61: softmax_lut = 16'd1448;
                 6'd62: softmax_lut = 16'd1360; default: softmax_lut = 16'd1278;
             endcase
+        end
+    endfunction
+
+    function automatic logic [15:0] normalize_softmax(
+        input logic [15:0] numerator,
+        input logic [20:0] denominator
+    );
+        logic [63:0] dividend;
+        begin
+            dividend = {48'd0, numerator} * 16'd65535;
+            normalize_softmax = dividend / denominator;
         end
     endfunction
 
@@ -260,8 +271,9 @@ module npu_peripheral (
                     state <= SOFTMAX_NORMALIZE;
                 end
                 SOFTMAX_NORMALIZE: begin
-                    softmax_output[softmax_index] <=
-                        ({16'd0, softmax_numerator[softmax_index]} * 32'd65535) / softmax_sum;
+                    softmax_output[softmax_index] <= normalize_softmax(
+                        softmax_numerator[softmax_index], softmax_sum
+                    );
                     if (softmax_index == 4'd15)
                         state <= DONE;
                     else
