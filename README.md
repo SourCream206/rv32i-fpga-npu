@@ -1,8 +1,7 @@
 # RV32I FPGA NPU
 
-Starter project for a memory-mapped FPGA NPU attached to the RV32I CPU in
-[`rv32i-starflight-fpga`](https://github.com/SourCream206/rv32i-starflight-fpga).
-The first projection engine tiles a signed INT8 4x4 MAC array into an
+Self-contained FPGA implementation of a memory-mapped RV32I NPU. The bundled
+single-cycle RV32I SoC drives a signed INT8 4x4 MAC array tiled into an
 autonomous 16x16 matrix-vector unit for a tiny character-level Transformer.
 
 ## Scope
@@ -29,7 +28,9 @@ tb/tb_mac_array_4x4.sv        Self-checking SystemVerilog testbench
 rtl/npu_peripheral.sv         Autonomous 16x16 tiled projection controller
 tb/tb_npu_peripheral.sv       Self-checking tiled projection/softmax testbench
 docs/memory_map.md            16x16 NPU register map and fixed-point contract
-docs/rv32i_integration.md     Exact existing-CPU integration changes
+rtl/soc/                      Bundled RV32I core, instruction ROM, data RAM, and interconnect
+fpga/                          DE10-Lite wrapper and Quartus project settings
+software/                     Bare-metal firmware, linker script, and build script
 ```
 
 ## Quantize and export
@@ -73,8 +74,8 @@ generate firmware-linkable arrays after training:
 
 ```powershell
 python scripts/train_and_export.py --output-dir model_hex
-python scripts/export_c_header.py --model-dir model_hex --output ..\riscPROJET\software\model_weights.h
-Copy-Item model_hex\quantization_config.h ..\riscPROJET\software\
+python scripts/export_c_header.py --model-dir model_hex --output software\model_weights.h
+Copy-Item model_hex\quantization_config.h software\
 ```
 
 `export_c_header.py` validates each `.hex` file against `model_hex/manifest.json`
@@ -84,11 +85,10 @@ before writing the signed `int8_t` arrays.
 
 `software/npu_transformer.c` is a standalone RV32I orchestration reference.
 Generate `software/model_weights.h`, then compile it with the copied local
-`software/quantization_config.h`. It assumes a host wrapper maps byte-addressed
-input and output banks at `0x0006_1000` and `0x0006_2000`; the wrapper is
-intentionally outside this repository. The reference runs Q/K/V, two FFN
-expansion and reduction tiles, residual addition, four vocabulary tiles, and
-writes the predicted token ID to `0x0004_0000`.
+`software/quantization_config.h`. The bundled SoC maps byte-addressed input
+and output banks at `0x0006_1000` and `0x0006_2000`. The reference runs Q/K/V,
+two FFN expansion and reduction tiles, residual addition, four vocabulary
+tiles, and writes the predicted token ID to `0x0004_0000`.
 
 ## Self-contained RV32I SoC
 
@@ -121,7 +121,6 @@ The testbench must print `PASS`.
 
 ## Memory map
 
-The NPU implements the `0x0006_xxxx` range used by the existing CPU. See
+The bundled SoC maps the NPU into `0x0006_xxxx`. See
 [docs/memory_map.md](docs/memory_map.md) for the complete map and software
-protocol, then use [docs/rv32i_integration.md](docs/rv32i_integration.md) to
-attach it to the RV32I system.
+protocol.
