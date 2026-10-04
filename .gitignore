@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 build/
+graphify-out/
+software/imem.hex
 work/
 modelsim.ini
 transcript

@@ -5,7 +5,12 @@ module npu_peripheral (
     input  logic [3:0]              bus_byte_enable,
     input  logic [31:0]             bus_addr,
     input  logic [31:0]             bus_wdata,
-    output logic [31:0]             bus_rdata
+    output logic [31:0]             bus_rdata,
+    input  logic                    input_bank_we,
+    input  logic [3:0]              input_bank_addr,
+    input  logic signed [7:0]       input_bank_wdata,
+    input  logic [3:0]              output_bank_addr,
+    output logic signed [7:0]       output_bank_rdata
 );
 
     localparam logic [5:2] CONTROL     = 4'h0;
@@ -52,7 +57,7 @@ module npu_peripheral (
     logic [3:0] output_address;
     logic [3:0] output_tile;
     logic [3:0] input_tile;
-    logic signed [31:0] projection_shift;
+    logic signed [5:0] projection_shift;
     logic [3:0] softmax_shift;
     logic apply_gelu;
     logic apply_softmax;
@@ -69,15 +74,17 @@ module npu_peripheral (
 
     function automatic logic signed [7:0] quantize_activation(
         input logic signed [31:0] value,
-        input logic signed [31:0] shift,
+        input logic signed [5:0] shift,
         input logic gelu
     );
-        logic signed [31:0] shifted;
+        logic signed [63:0] shifted;
+        logic signed [63:0] extended_value;
         begin
+            extended_value = value;
             if (shift >= 0)
-                shifted = value >>> shift;
+                shifted = extended_value >>> shift;
             else
-                shifted = value <<< -shift;
+                shifted = extended_value <<< -shift;
             if (gelu && (shifted < 0))
                 quantize_activation = 8'sd0;
             else if (shifted > 127)
@@ -206,6 +213,9 @@ module npu_peripheral (
             softmax_max <= '0;
             softmax_sum <= '0;
         end else begin
+            if (input_bank_we && ((state == IDLE) || (state == DONE)))
+                in_mem[input_bank_addr] <= input_bank_wdata;
+
             case (state)
                 INITIALIZE: begin
                     for (index = 0; index < 16; index = index + 1)
@@ -326,7 +336,7 @@ module npu_peripheral (
                     end
                     OUTPUT_ADDR: output_address <= bus_wdata[3:0];
                     SHIFT_REG: if ((state == IDLE) || (state == DONE))
-                        projection_shift <= $signed(bus_wdata);
+                        projection_shift <= $signed(bus_wdata[5:0]);
                     default: ;
                 endcase
             end
@@ -334,6 +344,7 @@ module npu_peripheral (
     end
 
     always_comb begin
+        output_bank_rdata = act_mem[output_bank_addr];
         bus_rdata = '0;
         if (bus_addr[31:16] == 16'h0006) begin
             case (bus_addr[5:2])
@@ -350,7 +361,7 @@ module npu_peripheral (
                     act_mem[output_address]
                 };
                 SOFTMAX_DATA: bus_rdata = {16'd0, softmax_output[output_address]};
-                SHIFT_REG:    bus_rdata = projection_shift;
+                SHIFT_REG:    bus_rdata = {{26{projection_shift[5]}}, projection_shift};
                 default:      bus_rdata = '0;
             endcase
         end

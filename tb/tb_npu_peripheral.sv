@@ -18,7 +18,12 @@ module tb_npu_peripheral;
         .bus_byte_enable(bus_byte_enable),
         .bus_addr(bus_addr),
         .bus_wdata(bus_wdata),
-        .bus_rdata(bus_rdata)
+        .bus_rdata(bus_rdata),
+        .input_bank_we(1'b0),
+        .input_bank_addr(4'd0),
+        .input_bank_wdata(8'sd0),
+        .output_bank_addr(4'd0),
+        .output_bank_rdata()
     );
 
     always #5 clk = ~clk;
@@ -41,6 +46,22 @@ module tb_npu_peripheral;
             #1;
             if (bus_rdata !== expected)
                 $fatal(1, "Read %h: expected %h, got %h", address, expected, bus_rdata);
+        end
+    endtask
+
+    task load_uniform_inputs(input logic [7:0] value);
+        begin
+            write_register(32'h0006_0008, 32'd0);
+            for (index = 0; index < 4; index = index + 1)
+                write_register(32'h0006_000C, {4{value}});
+        end
+    endtask
+
+    task load_uniform_weights(input logic [7:0] value);
+        begin
+            write_register(32'h0006_0010, 32'd0);
+            for (index = 0; index < 64; index = index + 1)
+                write_register(32'h0006_0014, {4{value}});
         end
     endtask
 
@@ -89,6 +110,23 @@ module tb_npu_peripheral;
         repeat (60) @(posedge clk);
         expect_read(32'h0006_0024, 32'd0);
         expect_read(32'h0006_0028, 32'h0202_0202);
+
+        load_uniform_inputs(8'sd127);
+        load_uniform_weights(8'sd1);
+        write_register(32'h0006_0030, 32'sd1);
+        expect_read(32'h0006_0030, 32'sd1);
+        write_register(32'h0006_0000, 32'h0000_0001);
+        repeat (60) @(posedge clk);
+        expect_read(32'h0006_0024, 32'd0);
+        expect_read(32'h0006_0028, 32'h7F7F_7F7F);
+
+        load_uniform_inputs(-8'sd128);
+        write_register(32'h0006_0030, -32'sd1);
+        expect_read(32'h0006_0030, -32'sd1);
+        write_register(32'h0006_0000, 32'h0000_0001);
+        repeat (60) @(posedge clk);
+        expect_read(32'h0006_0024, 32'd0);
+        expect_read(32'h0006_0028, 32'h8080_8080);
         $display("PASS: 16x16 tiled NPU projection and softmax");
         $finish;
     end

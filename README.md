@@ -80,6 +80,32 @@ Copy-Item model_hex\quantization_config.h ..\riscPROJET\software\
 `export_c_header.py` validates each `.hex` file against `model_hex/manifest.json`
 before writing the signed `int8_t` arrays.
 
+## Reference firmware
+
+`software/npu_transformer.c` is a standalone RV32I orchestration reference.
+Generate `software/model_weights.h`, then compile it with the copied local
+`software/quantization_config.h`. It assumes a host wrapper maps byte-addressed
+input and output banks at `0x0006_1000` and `0x0006_2000`; the wrapper is
+intentionally outside this repository. The reference runs Q/K/V, two FFN
+expansion and reduction tiles, residual addition, four vocabulary tiles, and
+writes the predicted token ID to `0x0004_0000`.
+
+## Self-contained RV32I SoC
+
+`rtl/soc/` contains a single-cycle RV32I core, 16 KiB instruction ROM, 8 KiB
+data RAM, and the NPU/LED interconnect. `fpga/` adds a DE10-Lite wrapper and
+Quartus project for the MAX 10 `10M50DAF484C7G`.
+
+Build the firmware image with a RISC-V GCC toolchain:
+
+```powershell
+.\software\build.ps1
+```
+
+This creates `software/imem.hex`, which the FPGA wrapper and
+`tb/tb_soc_npu.sv` load. The testbench watches the actual LED MMIO write, so a
+valid token ID of zero remains observable.
+
 ## Simulate
 
 With Icarus Verilog:
