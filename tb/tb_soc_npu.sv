@@ -40,6 +40,7 @@ module tb_soc_npu;
         #1;
         if (leds !== EXPECTED_TOKEN)
             $fatal(1, "LED register expected %0d, got %0d", EXPECTED_TOKEN, leds);
+        $display("INFO: firmware inference completed after %0d SoC cycles", cycles);
         $display("PASS: RV32I firmware completed NPU orchestration, token=%0d", leds);
         $finish;
     end

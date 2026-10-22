@@ -83,6 +83,10 @@ rerun, and read the LED bits as an unsigned number. A successful committed
 model run displays 37 (`LEDR[5]`, `LEDR[2]`, and `LEDR[0]` on). The reset button
 has asynchronous assertion and synchronized release.
 
+Hardware check (2026-10-21): the board showed `LEDR[5]`, `LEDR[2]`, and
+`LEDR[0]` lit, matching the expected token ID 37. This demo has no VGA or
+character display output.
+
 ## Files
 
 | Path | Purpose |
@@ -97,3 +101,5 @@ has asynchronous assertion and synchronized release.
 | `fpga/` | DE10-Lite top, pins, and clock constraints |
 
 See [docs/memory_map.md](docs/memory_map.md) for the register protocol.
+See [docs/accelerator_validation.md](docs/accelerator_validation.md) for the
+simulation, timing, and board bring-up results and their limits.
