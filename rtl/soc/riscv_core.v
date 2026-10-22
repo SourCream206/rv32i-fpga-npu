@@ -3,7 +3,7 @@ module riscv_core (
     input  wire        rst,
     output wire [31:0] imem_addr,
     input  wire [31:0] imem_rdata,
-    output reg  [31:0] dmem_addr,
+    output wire [31:0] dmem_addr,
     output reg  [31:0] dmem_wdata,
     output reg  [3:0]  dmem_wstrb,
     input  wire [31:0] dmem_rdata
@@ -11,6 +11,12 @@ module riscv_core (
 
     reg [31:0] pc;
     reg [31:0] registers [0:31];
+    // MAX 10 block RAM reads are clocked: one fetch phase and one load writeback phase.
+    localparam [1:0] FETCH = 2'd0, EXECUTE = 2'd1, LOAD_WRITEBACK = 2'd2;
+    reg [1:0] phase;
+    reg [31:0] pending_addr;
+    reg [4:0] pending_rd;
+    reg [2:0] pending_funct3;
     wire [6:0] opcode = imem_rdata[6:0];
     wire [2:0] funct3 = imem_rdata[14:12];
     wire [6:0] funct7 = imem_rdata[31:25];
@@ -30,19 +36,39 @@ module riscv_core (
     reg [31:0] next_pc;
     reg        write_rd;
     reg [31:0] rd_value;
-    reg [31:0] load_word;
     integer index;
 
     assign imem_addr = pc;
+    assign dmem_addr = phase == LOAD_WRITEBACK ? pending_addr :
+                       phase == EXECUTE && opcode == 7'b0000011 ? rs1_value + imm_i :
+                       phase == EXECUTE && opcode == 7'b0100011 ? rs1_value + imm_s : 32'd0;
+
+    function [31:0] loaded_value;
+        input [31:0] word;
+        input [31:0] address;
+        input [2:0] size;
+        reg [7:0] byte_value;
+        reg [15:0] half_value;
+        begin
+            byte_value = word >> (8 * address[1:0]);
+            half_value = word >> (16 * address[1]);
+            case (size)
+                3'b000: loaded_value = {{24{byte_value[7]}}, byte_value};
+                3'b001: loaded_value = {{16{half_value[15]}}, half_value};
+                3'b010: loaded_value = word;
+                3'b100: loaded_value = {24'd0, byte_value};
+                3'b101: loaded_value = {16'd0, half_value};
+                default: loaded_value = 32'd0;
+            endcase
+        end
+    endfunction
 
     always @* begin
         next_pc = pc + 4;
         write_rd = 1'b0;
         rd_value = 32'd0;
-        dmem_addr = 32'd0;
         dmem_wdata = 32'd0;
         dmem_wstrb = 4'd0;
-        load_word = dmem_rdata;
 
         case (opcode)
             7'b0110111: begin write_rd = 1'b1; rd_value = imm_u; end
@@ -67,32 +93,8 @@ module riscv_core (
                     3'b111: if (rs1_value >= rs2_value) next_pc = pc + imm_b;
                 endcase
             end
-            7'b0000011: begin
-                dmem_addr = rs1_value + imm_i;
-                write_rd = 1'b1;
-                case (funct3)
-                    3'b000: case (dmem_addr[1:0])
-                        2'd0: rd_value = {{24{load_word[7]}}, load_word[7:0]};
-                        2'd1: rd_value = {{24{load_word[15]}}, load_word[15:8]};
-                        2'd2: rd_value = {{24{load_word[23]}}, load_word[23:16]};
-                        default: rd_value = {{24{load_word[31]}}, load_word[31:24]};
-                    endcase
-                    3'b001: rd_value = dmem_addr[1] ?
-                        {{16{load_word[31]}}, load_word[31:16]} :
-                        {{16{load_word[15]}}, load_word[15:0]};
-                    3'b010: rd_value = load_word;
-                    3'b100: case (dmem_addr[1:0])
-                        2'd0: rd_value = {24'd0, load_word[7:0]};
-                        2'd1: rd_value = {24'd0, load_word[15:8]};
-                        2'd2: rd_value = {24'd0, load_word[23:16]};
-                        default: rd_value = {24'd0, load_word[31:24]};
-                    endcase
-                    3'b101: rd_value = dmem_addr[1] ?
-                        {16'd0, load_word[31:16]} : {16'd0, load_word[15:0]};
-                endcase
-            end
+            7'b0000011: begin end // The read completes in LOAD_WRITEBACK.
             7'b0100011: begin
-                dmem_addr = rs1_value + imm_s;
                 case (funct3)
                     3'b000: begin
                         dmem_wstrb = 4'b0001 << dmem_addr[1:0];
@@ -118,9 +120,12 @@ module riscv_core (
                     3'b110: rd_value = rs1_value | imm_i;
                     3'b111: rd_value = rs1_value & imm_i;
                     3'b001: rd_value = rs1_value << imem_rdata[24:20];
-                    3'b101: rd_value = imem_rdata[30] ?
-                        $signed(rs1_value) >>> imem_rdata[24:20] :
-                        rs1_value >> imem_rdata[24:20];
+                    3'b101: begin
+                        if (imem_rdata[30])
+                            rd_value = $signed(rs1_value) >>> imem_rdata[24:20];
+                        else
+                            rd_value = rs1_value >> imem_rdata[24:20];
+                    end
                 endcase
             end
             7'b0110011: begin
@@ -131,24 +136,53 @@ module riscv_core (
                     3'b010: rd_value = $signed(rs1_value) < $signed(rs2_value);
                     3'b011: rd_value = rs1_value < rs2_value;
                     3'b100: rd_value = rs1_value ^ rs2_value;
-                    3'b101: rd_value = funct7[5] ? $signed(rs1_value) >>> rs2_value[4:0] :
-                                                   rs1_value >> rs2_value[4:0];
+                    3'b101: begin
+                        if (funct7[5])
+                            rd_value = $signed(rs1_value) >>> rs2_value[4:0];
+                        else
+                            rd_value = rs1_value >> rs2_value[4:0];
+                    end
                     3'b110: rd_value = rs1_value | rs2_value;
                     3'b111: rd_value = rs1_value & rs2_value;
                 endcase
             end
         endcase
+        if (phase != EXECUTE)
+            dmem_wstrb = 4'd0;
     end
 
     always @(posedge clk) begin
         if (rst) begin
             pc <= 32'd0;
+            phase <= FETCH;
+            pending_addr <= 32'd0;
+            pending_rd <= 5'd0;
+            pending_funct3 <= 3'd0;
             for (index = 0; index < 32; index = index + 1)
                 registers[index] <= 32'd0;
         end else begin
-            pc <= next_pc;
-            if (write_rd && rd != 0)
-                registers[rd] <= rd_value;
+            case (phase)
+                FETCH: phase <= EXECUTE;
+                EXECUTE: begin
+                    pc <= next_pc;
+                    if (opcode == 7'b0000011) begin
+                        pending_addr <= dmem_addr;
+                        pending_rd <= rd;
+                        pending_funct3 <= funct3;
+                        phase <= LOAD_WRITEBACK;
+                    end else begin
+                        if (write_rd && rd != 0)
+                            registers[rd] <= rd_value;
+                        phase <= FETCH;
+                    end
+                end
+                LOAD_WRITEBACK: begin
+                    if (pending_rd != 0)
+                        registers[pending_rd] <= loaded_value(dmem_rdata, pending_addr, pending_funct3);
+                    phase <= FETCH;
+                end
+                default: phase <= FETCH;
+            endcase
             registers[0] <= 32'd0;
         end
     end

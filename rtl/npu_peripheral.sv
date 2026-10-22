@@ -26,6 +26,7 @@ module npu_peripheral (
     localparam logic [5:2] OUTPUT_DATA = 4'hA;
     localparam logic [5:2] SOFTMAX_DATA = 4'hB;
     localparam logic [5:2] SHIFT_REG    = 4'hC;
+    localparam logic [5:2] ACCUM_DATA   = 4'hD;
 
     typedef enum logic [3:0] {
         IDLE,
@@ -39,6 +40,7 @@ module npu_peripheral (
         SOFTMAX_BUILD,
         SOFTMAX_SUM_READY,
         SOFTMAX_NORMALIZE,
+        SOFTMAX_DIVIDE,
         DONE
     } npu_state_t;
 
@@ -64,6 +66,12 @@ module npu_peripheral (
     logic [3:0] softmax_index;
     logic signed [31:0] softmax_max;
     logic [20:0] softmax_sum;
+    logic [31:0] divide_dividend;
+    logic [31:0] divide_quotient;
+    logic [21:0] divide_remainder;
+    logic [5:0] divide_bit;
+    logic [21:0] divide_trial;
+    logic divide_take;
 
     logic signed [7:0] mac_activations [0:3];
     logic signed [7:0] mac_weights [0:3][0:3];
@@ -154,16 +162,8 @@ module npu_peripheral (
         end
     endfunction
 
-    function automatic logic [15:0] normalize_softmax(
-        input logic [15:0] numerator,
-        input logic [20:0] denominator
-    );
-        logic [63:0] dividend;
-        begin
-            dividend = {48'd0, numerator} * 16'd65535;
-            normalize_softmax = dividend / denominator;
-        end
-    endfunction
+    assign divide_trial = {divide_remainder[20:0], divide_dividend[31]};
+    assign divide_take = divide_trial >= {1'b0, softmax_sum};
 
     genvar lane;
     genvar row;
@@ -212,6 +212,12 @@ module npu_peripheral (
             softmax_index <= '0;
             softmax_max <= '0;
             softmax_sum <= '0;
+            divide_dividend <= '0;
+            divide_quotient <= '0;
+            divide_remainder <= '0;
+            divide_bit <= '0;
+            for (index = 0; index < 16; index = index + 1)
+                bias_mem[index] <= '0;
         end else begin
             if (input_bank_we && ((state == IDLE) || (state == DONE)))
                 in_mem[input_bank_addr] <= input_bank_wdata;
@@ -285,13 +291,26 @@ module npu_peripheral (
                     state <= SOFTMAX_NORMALIZE;
                 end
                 SOFTMAX_NORMALIZE: begin
-                    softmax_output[softmax_index] <= normalize_softmax(
-                        softmax_numerator[softmax_index], softmax_sum
-                    );
-                    if (softmax_index == 4'd15)
-                        state <= DONE;
-                    else
-                        softmax_index <= softmax_index + 1'b1;
+                    divide_dividend <= {16'd0, softmax_numerator[softmax_index]} * 16'd65535;
+                    divide_quotient <= '0;
+                    divide_remainder <= '0;
+                    divide_bit <= 6'd31;
+                    state <= SOFTMAX_DIVIDE;
+                end
+                SOFTMAX_DIVIDE: begin
+                    divide_remainder <= divide_take ? divide_trial - {1'b0, softmax_sum} : divide_trial;
+                    divide_quotient <= {divide_quotient[30:0], divide_take};
+                    divide_dividend <= {divide_dividend[30:0], 1'b0};
+                    if (divide_bit == 0) begin
+                        softmax_output[softmax_index] <= {divide_quotient[14:0], divide_take};
+                        if (softmax_index == 4'd15)
+                            state <= DONE;
+                        else begin
+                            softmax_index <= softmax_index + 1'b1;
+                            state <= SOFTMAX_NORMALIZE;
+                        end
+                    end else
+                        divide_bit <= divide_bit - 1'b1;
                 end
                 default: ;
             endcase
@@ -362,6 +381,7 @@ module npu_peripheral (
                 };
                 SOFTMAX_DATA: bus_rdata = {16'd0, softmax_output[output_address]};
                 SHIFT_REG:    bus_rdata = {{26{projection_shift[5]}}, projection_shift};
+                ACCUM_DATA:   bus_rdata = projection_accum[output_address];
                 default:      bus_rdata = '0;
             endcase
         end

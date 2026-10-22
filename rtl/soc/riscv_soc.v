@@ -8,14 +8,16 @@ module riscv_soc #(
 
     wire [31:0] imem_addr;
     wire [31:0] imem_rdata;
+    wire [31:0] imem_data_rdata;
     wire [31:0] cpu_addr;
     wire [31:0] cpu_wdata;
     wire [3:0]  cpu_wstrb;
     reg  [31:0] cpu_rdata;
     wire        cpu_we = |cpu_wstrb;
     wire        dmem_select = (cpu_addr >= 32'h0000_4000) && (cpu_addr < 32'h0000_6000);
+    wire        flash_select = cpu_addr < 32'h0000_4000;
     wire        led_select = cpu_addr == 32'h0004_0000;
-    wire        npu_reg_select = (cpu_addr >= 32'h0006_0000) && (cpu_addr <= 32'h0006_0030);
+    wire        npu_reg_select = (cpu_addr >= 32'h0006_0000) && (cpu_addr <= 32'h0006_0034);
     wire        npu_input_select = (cpu_addr >= 32'h0006_1000) && (cpu_addr < 32'h0006_1010);
     wire        npu_output_select = (cpu_addr >= 32'h0006_2000) && (cpu_addr < 32'h0006_2010);
     wire [31:0] dmem_rdata;
@@ -50,8 +52,11 @@ module riscv_soc #(
     );
 
     imem #(.INIT_FILE(IMEM_FILE)) instruction_memory (
+        .clk(clk),
         .addr(imem_addr),
-        .rdata(imem_rdata)
+        .rdata(imem_rdata),
+        .data_addr(cpu_addr),
+        .data_rdata(imem_data_rdata)
     );
 
     dmem data_memory (
@@ -88,6 +93,8 @@ module riscv_soc #(
     always @* begin
         if (dmem_select)
             cpu_rdata = dmem_rdata;
+        else if (flash_select)
+            cpu_rdata = imem_data_rdata;
         else if (npu_reg_select)
             cpu_rdata = npu_rdata;
         else if (npu_output_select)

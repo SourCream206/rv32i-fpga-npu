@@ -65,6 +65,16 @@ module tb_npu_peripheral;
         end
     endtask
 
+    task wait_done;
+        integer tick;
+        begin
+            for (tick = 0; tick < 1000 && dut.state != dut.DONE; tick = tick + 1)
+                @(posedge clk);
+            if (dut.state != dut.DONE)
+                $fatal(1, "NPU did not complete within 1000 clocks");
+        end
+    endtask
+
     initial begin
         rst = 1'b1;
         bus_we = 1'b0;
@@ -99,10 +109,11 @@ module tb_npu_peripheral;
         write_register(32'h0006_0000, 32'h0000_0009);
         expect_read(32'h0006_0004, 32'h0000_0001);
 
-        repeat (100) @(posedge clk);
+        wait_done();
         expect_read(32'h0006_0004, 32'h0000_0002);
         write_register(32'h0006_0024, 32'd0);
         expect_read(32'h0006_0028, 32'h0101_0101);
+        expect_read(32'h0006_0034, 32'd1);
         expect_read(32'h0006_002C, 32'd4095);
 
         write_register(32'h0006_0030, -32'sd1);

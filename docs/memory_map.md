@@ -1,6 +1,6 @@
 # 16x16 projection NPU memory map
 
-The NPU reserves `0x0006_0000` through `0x0006_002F` in the RV32I data-memory
+The NPU reserves `0x0006_0000` through `0x0006_0037` in the RV32I data-memory
 map. One start command executes all sixteen 4x4 tiles required for a 16x16
 matrix-vector projection. No CPU intervention occurs while the NPU is busy.
 
@@ -16,9 +16,10 @@ matrix-vector projection. No CPU intervention occurs while the NPU is busy.
 | `0x0006_001C` | `NPU_BIAS_DATA` | WO | Four packed signed INT8 biases. Address autoincrements by four. |
 | `0x0006_0020` | `NPU_SCALE` | RW | Bits 11:8: softmax-delta arithmetic right shift. |
 | `0x0006_0024` | `NPU_OUTPUT_ADDR` | RW | First output or softmax index, `0..15`. |
-| `0x0006_0028` | `NPU_OUTPUT_DATA` | RO | Four packed signed Q4.4 activations, little-endian, starting at output address. |
+| `0x0006_0028` | `NPU_OUTPUT_DATA` | RO | Four packed signed INT8 activations, little-endian, starting at output address; software defines their scale. |
 | `0x0006_002C` | `NPU_SOFTMAX_DATA` | RO | Q0.16 probability for output address in bits 15:0. Valid after a start with control bit 3 set. |
 | `0x0006_0030` | `NPU_SHIFT_REG` | RW | Signed 6-bit projection shift. Nonnegative values use arithmetic right shift; negative values use arithmetic left shift. |
+| `0x0006_0034` | `NPU_ACCUM_DATA` | RO | Signed INT32 projection accumulator for `NPU_OUTPUT_ADDR`, valid after `done`. Increment the output address explicitly between reads. |
 | `0x0006_1000`–`0x0006_100F` | `NPU_INPUT_BASE` | RW | Byte-addressed signed INT8 input bank. |
 | `0x0006_2000`–`0x0006_200F` | `NPU_OUTPUT_BASE` | RO | Byte-addressed signed INT8 activation bank. |
 
@@ -37,8 +38,16 @@ negative results clip to zero; this is selected hardware GeLU approximation.
 
 With control bit 3 set, a 64-entry LUT evaluates `exp(-delta / 16)` for
 clamped `delta` indices `0..63`, where `delta` is the shifted difference from
-the largest Q4.4 logit. The NPU sums all LUT values and normalizes them to
+the largest output. For meaningful probabilities, supply logits in Q4.4 and
+set the softmax shift to zero. The NPU sums all LUT values and normalizes them to
 Q0.16. For equal logits, each of sixteen outputs is `4095`.
+
+The firmware uses `NPU_ACCUM_DATA` for every dense layer. It leaves the
+hardware bias bank at its reset value of zero, reads each full INT32 dot product,
+adds the exported bias after converting its scale to accumulator units, and
+then shifts and saturates in RV32I. This also lets it add both FF2 column tiles
+before narrowing to INT8. The hardware bias port remains available for callers
+whose bias already fits signed INT8 accumulator units.
 
 ## Software sequence
 
@@ -49,5 +58,6 @@ Q0.16. For equal logits, each of sixteen outputs is `4095`.
 3. Write `1`, `5`, `9`, or `13` to `NPU_CONTROL` for raw, clipped-ReLU,
    softmax, or clipped-ReLU-plus-softmax execution.
 4. Poll `NPU_STATUS.done`.
-5. Set `NPU_OUTPUT_ADDR`, then read packed activations from `NPU_OUTPUT_DATA`.
-   If enabled, read one Q0.16 probability from `NPU_SOFTMAX_DATA`.
+5. Set `NPU_OUTPUT_ADDR`, then read the corresponding INT32 sum from
+   `NPU_ACCUM_DATA` or packed activations from `NPU_OUTPUT_DATA`. If softmax was
+   enabled, read one Q0.16 probability from `NPU_SOFTMAX_DATA`.

@@ -7,17 +7,18 @@ module dmem (
     output wire [31:0] rdata
 );
 
-    reg [31:0] memory [0:2047];
     wire [10:0] word_addr = addr[12:2];
-
-    always @(posedge clk) begin
-        if (we) begin
-            if (byte_enable[0]) memory[word_addr][7:0] <= wdata[7:0];
-            if (byte_enable[1]) memory[word_addr][15:8] <= wdata[15:8];
-            if (byte_enable[2]) memory[word_addr][23:16] <= wdata[23:16];
-            if (byte_enable[3]) memory[word_addr][31:24] <= wdata[31:24];
+    genvar lane;
+    generate
+        for (lane = 0; lane < 4; lane = lane + 1) begin : byte_bank
+            (* ramstyle = "M9K" *) reg [7:0] memory [0:2047];
+            reg [7:0] read_byte;
+            always @(posedge clk) begin
+                if (we && byte_enable[lane])
+                    memory[word_addr] <= wdata[lane * 8 +: 8];
+                read_byte <= memory[word_addr];
+            end
+            assign rdata[lane * 8 +: 8] = read_byte;
         end
-    end
-
-    assign rdata = memory[word_addr];
+    endgenerate
 endmodule
